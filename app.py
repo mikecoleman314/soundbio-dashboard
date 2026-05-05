@@ -325,7 +325,7 @@ def render_projects():
             st.plotly_chart(fig, use_container_width=True)
 
     # D. MCA Biplot
-    st.subheader("MCA Biplot")
+    st.subheader("Multiple Correspondence Analysis (MCA) Biplot")
     try:
         import prince
 
@@ -390,7 +390,7 @@ def render_projects():
 
             inertia = mca.percentage_of_variance_
             fig.update_layout(
-                title="MCA Biplot",
+                title="Multiple Correspondence Analysis (MCA) Biplot",
                 xaxis_title=f"Dimension 1 ({inertia[0]:.1f}%)",
                 yaxis_title=f"Dimension 2 ({inertia[1]:.1f}%)",
                 hovermode="closest",
@@ -398,7 +398,7 @@ def render_projects():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            st.subheader("Download MCA Data")
+            st.subheader("Download Multiple Correspondence Analysis (MCA) Data")
             d1, d2, d3 = st.columns(3)
             with d1:
                 buf = io.BytesIO()
