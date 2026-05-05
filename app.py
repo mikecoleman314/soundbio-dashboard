@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import io
+from datetime import datetime, date
 
 # --- CONFIGURATION ---
 SHEET_ID = "1PS01WSaHwVLh5_lH2MkkJYKFk_Rov7r0wyF-QZo6QNg"
@@ -171,15 +172,30 @@ def render_workshop_needs():
         st.error("Could not load workshop_needs data")
         return
     df = _drop_unnamed(df)
-    if "par_percent" in df.columns:
+
+    has_qty_min = "Quantity" in df.columns and "Min Level" in df.columns
+    has_par = "par_percent" in df.columns
+
+    if has_qty_min:
+        qty = pd.to_numeric(df["Quantity"], errors="coerce")
+        minl = pd.to_numeric(df["Min Level"], errors="coerce")
+        n = int((qty < minl).sum())
+        st.metric("Items below min level", n)
+    elif has_par:
         par_vals = pd.to_numeric(df["par_percent"], errors="coerce")
         n = int((par_vals < 100).sum())
         st.metric("Items below par", n)
 
     def _highlight(row):
-        val = pd.to_numeric(row.get("par_percent"), errors="coerce")
-        if pd.notna(val) and val < 100:
-            return ["background-color: #FFFFCC; color: black"] * len(row)
+        if has_qty_min:
+            q = pd.to_numeric(row.get("Quantity"), errors="coerce")
+            m = pd.to_numeric(row.get("Min Level"), errors="coerce")
+            if pd.notna(q) and pd.notna(m) and q < m:
+                return ["background-color: yellow; color: black"] * len(row)
+        elif has_par:
+            val = pd.to_numeric(row.get("par_percent"), errors="coerce")
+            if pd.notna(val) and val < 100:
+                return ["background-color: yellow; color: black"] * len(row)
         return [""] * len(row)
 
     searchable_table(df, "workshop_needs", styler_fn=_highlight, filter_columns=SECTION_FILTERS.get("workshop_needs"))
@@ -205,7 +221,7 @@ def render_equipment():
     def _highlight(row):
         val = pd.to_numeric(row.get("percent_redundancy_par_met"), errors="coerce")
         if pd.notna(val) and val < 100:
-            return ["background-color: #FFFFCC; color: black"] * len(row)
+            return ["background-color: yellow; color: black"] * len(row)
         return [""] * len(row)
 
     searchable_table(df, "equipment", styler_fn=_highlight, filter_columns=SECTION_FILTERS.get("equipment"))
@@ -218,15 +234,28 @@ def render_preventative_maintenance():
         st.error("Could not load preventative_maintenance data")
         return
 
-    if "PM_due_days" in df.columns:
+    today = pd.Timestamp(date.today())
+    has_pm_due = "PM_due" in df.columns
+    has_pm_due_days = "PM_due_days" in df.columns
+
+    if has_pm_due:
+        dates = pd.to_datetime(df["PM_due"], errors="coerce")
+        n = int((dates < today).sum())
+        st.metric("PMs past due", n)
+    elif has_pm_due_days:
         vals = pd.to_numeric(df["PM_due_days"], errors="coerce")
-        n = int((vals < 7).sum())
-        st.metric("Tasks due within 7 days", n)
+        n = int((vals < 0).sum())
+        st.metric("PMs past due", n)
 
     def _highlight(row):
-        val = pd.to_numeric(row.get("PM_due_days"), errors="coerce")
-        if pd.notna(val) and val < 7:
-            return ["background-color: #FFCCCC; color: black"] * len(row)
+        if has_pm_due:
+            val = pd.to_datetime(row.get("PM_due"), errors="coerce")
+            if pd.notna(val) and val < today:
+                return ["background-color: yellow; color: black"] * len(row)
+        elif has_pm_due_days:
+            val = pd.to_numeric(row.get("PM_due_days"), errors="coerce")
+            if pd.notna(val) and val < 0:
+                return ["background-color: yellow; color: black"] * len(row)
         return [""] * len(row)
 
     searchable_table(df, "maintenance", styler_fn=_highlight, filter_columns=SECTION_FILTERS.get("preventative_maintenance"))
@@ -368,6 +397,36 @@ def render_projects():
                 height=600,
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            st.subheader("Download MCA Data")
+            d1, d2, d3 = st.columns(3)
+            with d1:
+                buf = io.BytesIO()
+                row_coords.to_csv(buf, index=True)
+                st.download_button(
+                    "Download Embeddings (CSV)",
+                    data=buf.getvalue(),
+                    file_name="mca_embeddings.csv",
+                    mime="text/csv",
+                )
+            with d2:
+                buf = io.BytesIO()
+                col_coords.to_csv(buf, index=True)
+                st.download_button(
+                    "Download Loadings (CSV)",
+                    data=buf.getvalue(),
+                    file_name="mca_loadings.csv",
+                    mime="text/csv",
+                )
+            with d3:
+                buf = io.BytesIO()
+                mca_df.to_csv(buf, index=False)
+                st.download_button(
+                    "Download Raw Data (CSV)",
+                    data=buf.getvalue(),
+                    file_name="mca_raw_data.csv",
+                    mime="text/csv",
+                )
         else:
             st.warning("MCA could not be computed.")
     except Exception:
@@ -399,6 +458,55 @@ SECTION_RENDERERS = {
 
 
 # ---------------------------------------------------------------------------
+# Summary header helpers
+# ---------------------------------------------------------------------------
+def _count_active_projects():
+    df = load_tab("projects")
+    if df is None or "Status" not in df.columns:
+        return 0
+    return int((df["Status"] != "Rejected").sum())
+
+
+def _count_pms_due():
+    df = load_tab("maintenance")
+    if df is None:
+        return 0
+    if "PM_due" in df.columns:
+        today = pd.Timestamp(date.today())
+        dates = pd.to_datetime(df["PM_due"], errors="coerce")
+        return int((dates < today).sum())
+    if "PM_due_days" in df.columns:
+        vals = pd.to_numeric(df["PM_due_days"], errors="coerce")
+        return int((vals < 0).sum())
+    return 0
+
+
+def _count_workshop_below_min():
+    df = load_tab("workshop_needs")
+    if df is None:
+        return 0
+    df = _drop_unnamed(df)
+    if "Quantity" in df.columns and "Min Level" in df.columns:
+        qty = pd.to_numeric(df["Quantity"], errors="coerce")
+        minl = pd.to_numeric(df["Min Level"], errors="coerce")
+        return int((qty < minl).sum())
+    if "par_percent" in df.columns:
+        vals = pd.to_numeric(df["par_percent"], errors="coerce")
+        return int((vals < 100).sum())
+    return 0
+
+
+def _count_equipment_below_par():
+    df = load_tab("equipment")
+    if df is None:
+        return 0
+    if "percent_redundancy_par_met" in df.columns:
+        vals = pd.to_numeric(df["percent_redundancy_par_met"], errors="coerce")
+        return int((vals < 100).sum())
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="SoundBio Lab Dashboard", layout="wide")
@@ -411,6 +519,13 @@ with col2:
     if st.button("Refresh Data"):
         st.cache_data.clear()
         st.rerun()
+
+# Summary header
+s1, s2, s3, s4 = st.columns(4)
+s1.metric("Active Projects", _count_active_projects())
+s2.metric("PMs Due", _count_pms_due())
+s3.metric("Workshop Needs Below Min", _count_workshop_below_min())
+s4.metric("Equipment Below Par", _count_equipment_below_par())
 
 for i, section in enumerate(SECTION_ORDER):
     if i > 0:
