@@ -2,14 +2,42 @@ name: Keep Streamlit Alive
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/14 * * * *'
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping app
+      - name: Install Playwright
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://sblnow.streamlit.app/_stcore/health)
-          echo "Status: $STATUS"
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Visit app with headless browser
+        run: |
+          python3 << 'EOF'
+          import asyncio
+          from playwright.async_api import async_playwright
+
+          APP_URL = "https://sblnow.streamlit.app"
+
+          async def keep_alive():
+              async with async_playwright() as p:
+                  browser = await p.chromium.launch()
+                  page = await browser.new_page()
+                  print(f"Navigating to {APP_URL} ...")
+                  try:
+                      await page.goto(APP_URL, wait_until="networkidle", timeout=120000)
+                      print("Page loaded, waiting 30s to keep WebSocket alive ...")
+                      await asyncio.sleep(30)
+                      title = await page.title()
+                      print(f"Page title: {title}")
+                  except Exception as e:
+                      print(f"Error: {e}")
+                  finally:
+                      await browser.close()
+                  print("Done.")
+
+          asyncio.run(keep_alive())
+          EOF
