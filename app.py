@@ -330,7 +330,7 @@ def render_projects():
         import prince
 
         # Identify a project-ID column (try common names, fall back to row index)
-        _id_candidates = ["Project ID", "project_id", "ProjectID", "ID", "id",
+        _id_candidates = ["Project Id", "Project ID", "project_id", "ProjectID", "ID", "id",
                           "Project Name", "project_name", "Title", "title", "Name"]
         _id_col = next((c for c in _id_candidates if c in df.columns), None)
 
