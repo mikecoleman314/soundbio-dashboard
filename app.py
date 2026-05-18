@@ -324,10 +324,15 @@ def render_projects():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-    # D. MCA Biplot
-    st.subheader("Multiple Correspondence Analysis (MCA) Biplot")
+    # D. MCA — two separate plots
+    st.subheader("Multiple Correspondence Analysis (MCA)")
     try:
         import prince
+
+        # Identify a project-ID column (try common names, fall back to row index)
+        _id_candidates = ["Project ID", "project_id", "ProjectID", "ID", "id",
+                          "Project Name", "project_name", "Title", "title", "Name"]
+        _id_col = next((c for c in _id_candidates if c in df.columns), None)
 
         tech_for_mca = [c for c in TECHNIQUE_COLS if c in df.columns]
         mca_df = df[tech_for_mca].copy()
@@ -342,62 +347,98 @@ def render_projects():
 
             row_coords = mca.row_coordinates(mca_df)
             col_coords = mca.column_coordinates(mca_df)
+            inertia = mca.percentage_of_variance_
 
-            fig = go.Figure()
+            # --- D1. Individuals plot ---
+            st.markdown("**Individuals (Projects)**")
 
-            # Row points colored by Domain
             if "Domain" in df.columns:
                 domains = df.loc[mca_df.index, "Domain"].astype(str).fillna("Unknown")
             else:
                 domains = pd.Series(["Unknown"] * len(mca_df), index=mca_df.index)
 
-            for domain in domains.unique():
+            if _id_col:
+                labels = df.loc[mca_df.index, _id_col].astype(str).tolist()
+            else:
+                labels = [str(i) for i in mca_df.index]
+
+            fig_ind = go.Figure()
+            for domain in sorted(domains.unique()):
                 mask = domains == domain
-                fig.add_trace(go.Scatter(
+                fig_ind.add_trace(go.Scatter(
                     x=row_coords.loc[mask, 0],
                     y=row_coords.loc[mask, 1],
-                    mode="markers",
+                    mode="markers+text",
                     name=domain,
+                    text=[labels[i] for i, m in enumerate(mask) if m],
+                    textposition="top center",
+                    textfont=dict(size=8),
                     marker=dict(size=8),
+                    hovertemplate=(
+                        "<b>%{text}</b><br>"
+                        f"Domain: {domain}<br>"
+                        "Dim 1: %{x:.3f}<br>"
+                        "Dim 2: %{y:.3f}<extra></extra>"
+                    ),
                 ))
-
-            # Column arrows
-            for idx, row_data in col_coords.iterrows():
-                x_end, y_end = row_data[0], row_data[1]
-                fig.add_trace(go.Scatter(
-                    x=[0, x_end], y=[0, y_end],
-                    mode="lines",
-                    line=dict(color="gray", width=1.5),
-                    showlegend=False,
-                    hoverinfo="skip",
-                ))
-                fig.add_annotation(
-                    x=x_end, y=y_end, ax=0, ay=0,
-                    xref="x", yref="y", axref="x", ayref="y",
-                    showarrow=True, arrowhead=2, arrowsize=1,
-                    arrowwidth=1.5, arrowcolor="gray",
-                )
-                scale = 1.15
-                x_label, y_label = x_end * scale, y_end * scale
-                xanchor = "left" if x_end >= 0 else "right"
-                yanchor = "bottom" if y_end >= 0 else "top"
-                fig.add_annotation(
-                    x=x_label, y=y_label, text=str(idx),
-                    showarrow=False,
-                    font=dict(size=9, color="darkgray"),
-                    xanchor=xanchor, yanchor=yanchor,
-                )
-
-            inertia = mca.percentage_of_variance_
-            fig.update_layout(
-                title="Multiple Correspondence Analysis (MCA) Biplot",
+            fig_ind.update_layout(
+                title="MCA — Individuals Plot",
                 xaxis_title=f"Dimension 1 ({inertia[0]:.1f}%)",
                 yaxis_title=f"Dimension 2 ({inertia[1]:.1f}%)",
                 hovermode="closest",
                 height=600,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig_ind, use_container_width=True)
 
+            # --- D2. Variables plot ---
+            st.markdown("**Variables (Techniques)**")
+
+            fig_var = go.Figure()
+            for idx, row_data in col_coords.iterrows():
+                x_end, y_end = row_data[0], row_data[1]
+                # Arrow line from origin to variable point
+                fig_var.add_trace(go.Scatter(
+                    x=[0, x_end], y=[0, y_end],
+                    mode="lines",
+                    line=dict(color="steelblue", width=1.5),
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
+                fig_var.add_annotation(
+                    x=x_end, y=y_end, ax=0, ay=0,
+                    xref="x", yref="y", axref="x", ayref="y",
+                    showarrow=True, arrowhead=2, arrowsize=1,
+                    arrowwidth=1.5, arrowcolor="steelblue",
+                )
+                scale = 1.15
+                xanchor = "left" if x_end >= 0 else "right"
+                yanchor = "bottom" if y_end >= 0 else "top"
+                fig_var.add_annotation(
+                    x=x_end * scale, y=y_end * scale, text=str(idx),
+                    showarrow=False,
+                    font=dict(size=9, color="steelblue"),
+                    xanchor=xanchor, yanchor=yanchor,
+                )
+            # Variable points
+            fig_var.add_trace(go.Scatter(
+                x=col_coords[0],
+                y=col_coords[1],
+                mode="markers",
+                marker=dict(size=7, color="steelblue"),
+                text=col_coords.index.astype(str),
+                hovertemplate="<b>%{text}</b><br>Dim 1: %{x:.3f}<br>Dim 2: %{y:.3f}<extra></extra>",
+                showlegend=False,
+            ))
+            fig_var.update_layout(
+                title="MCA — Variables Plot",
+                xaxis_title=f"Dimension 1 ({inertia[0]:.1f}%)",
+                yaxis_title=f"Dimension 2 ({inertia[1]:.1f}%)",
+                hovermode="closest",
+                height=550,
+            )
+            st.plotly_chart(fig_var, use_container_width=True)
+
+            # --- Downloads ---
             st.subheader("Download Multiple Correspondence Analysis (MCA) Data")
             d1, d2, d3 = st.columns(3)
             with d1:
@@ -431,6 +472,10 @@ def render_projects():
             st.warning("MCA could not be computed.")
     except Exception:
         st.warning("MCA could not be computed.")
+
+    # E. Full project data table
+    st.subheader("Project Data")
+    searchable_table(df, "projects_table", filter_columns=SECTION_FILTERS.get("projects"))
 
 
 def render_members():
