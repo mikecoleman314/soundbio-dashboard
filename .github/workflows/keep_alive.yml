@@ -1,25 +1,37 @@
 name: Keep Streamlit Alive
 
+# Streamlit Community Cloud puts apps to sleep after 12 hours of inactivity.
+# A commit to the repo resets the inactivity countdown.
+# This workflow pushes a trivial commit every 6 hours, ensuring the countdown
+# never reaches 12 hours and the app never sleeps.
+#
+# NOTE: If the app is currently sleeping, wake it manually once from
+# https://share.streamlit.io — after that this workflow keeps it awake.
+
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *'   # Every 6 hours (well within the 12-hour threshold)
+  workflow_dispatch:          # Allow manual trigger from the Actions tab
 
 jobs:
   keepalive:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    permissions:
+      contents: write         # Required to push the keepalive commit
+
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          ref: main
 
-      - name: Install Playwright
+      - name: Push keepalive commit to reset sleep countdown
         run: |
-          pip install playwright
-          playwright install chromium --with-deps
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Wake app if sleeping
-        run: python .github/scripts/keepalive.py
+          echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > .github/keepalive_timestamp
+          git add .github/keepalive_timestamp
+          git commit -m "chore: keepalive"
+          git push origin main
+
+          echo "Done — keepalive commit pushed, Streamlit sleep countdown reset."
