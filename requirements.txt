@@ -1,7 +1,11 @@
 streamlit
 pandas
-gspread
-google-auth
 plotly
 prince
+gspread
+google-auth
+google-auth-oauthlib
 openpyxl
+scikit-learn
+scipy
+gitpython
